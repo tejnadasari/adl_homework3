@@ -3,10 +3,8 @@ from typing import overload
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# Correct model checkpoint for this assignment
 checkpoint = "HuggingFaceTB/SmolLM2-360M-Instruct"
 
-# Device selection (cuda / mps / cpu)
 device = (
     "cuda" if torch.cuda.is_available()
     else "mps" if torch.backends.mps.is_available()
@@ -75,12 +73,10 @@ class BaseLLM:
         temperature: float = 0,
     ) -> list[str] | list[list[str]]:
 
-        # Correct left-padding for generation
         self.tokenizer.padding_side = "left"
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        # Batch tokenize
         inputs = self.tokenizer(
             prompts,
             padding=True,
@@ -89,8 +85,6 @@ class BaseLLM:
 
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
-
-        # ✨ BOOSTED GENERATION SETTINGS ✨
         generation_kwargs = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
@@ -106,21 +100,17 @@ class BaseLLM:
         if num_return_sequences is not None:
             generation_kwargs["num_return_sequences"] = num_return_sequences
 
-        # Generate sequences
         with torch.no_grad():
             outputs = self.model.generate(**generation_kwargs)
 
-        # Correct slicing: remove the entire prompt for each output
         input_len = input_ids.shape[1]
         generated_only = outputs[:, input_len:]
 
-        # Decode ONLY the generated tokens
         decoded = self.tokenizer.batch_decode(
             generated_only,
             skip_special_tokens=True
         )
 
-        # If multiple sequences per prompt -> group them
         if num_return_sequences and num_return_sequences > 1:
             grouped = []
             for i in range(0, len(decoded), num_return_sequences):
