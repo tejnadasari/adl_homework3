@@ -1,84 +1,83 @@
 from .base_llm import BaseLLM
 
-
 class CoTModel(BaseLLM):
-    def __init__(self, checkpoint="HuggingFaceTB/SmolLM2-1.7B-Instruct"):
+    def __init__(self, checkpoint="HuggingFaceTB/SmolLM2-360M-Instruct"):
         super().__init__(checkpoint)
 
     def format_prompt(self, question: str) -> str:
         """
-        Convert the question into a chat-style prompt with:
-        - clear system instruction
-        - 3 high-quality in-context examples
-        - the user question
-        - proper chat template usage
+        Highly structured CoT format optimized for 360M models.
+        - Explicit step-by-step reasoning
+        - Explicit unit equivalence statement
+        - Explicit multiply operation
+        - Always ends with <answer>...</answer>
         """
 
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "You are a precise unit conversion assistant. "
-                    "For every question: (1) show short step-by-step reasoning, "
-                    "(2) ALWAYS end with the final number inside <answer>number</answer>. "
-                    "Never add text after the answer tag."
-                ),
+                    "You are a careful math assistant. "
+                    "Solve unit conversion questions using the correct conversion factor. "
+                    "Show the steps: state the unit relationship, multiply, and output the final number "
+                    "INSIDE <answer></answer>. Only produce one answer."
+                )
             },
 
             # Example 1
             {
                 "role": "user",
-                "content": "How many grams are in 2 kg?"
+                "content": "How many grams are in 4 kilograms?"
             },
             {
                 "role": "assistant",
                 "content": (
-                    "1 kg = 1000 grams.\n"
-                    "2 kg = 2 × 1000 = <answer>2000</answer>"
-                ),
+                    "1 kilogram = 1000 grams. "
+                    "Compute: 4 × 1000 = 4000. "
+                    "<answer>4000.0</answer>"
+                )
             },
 
             # Example 2
             {
                 "role": "user",
-                "content": "How many meters are in 3 km?"
+                "content": "How many centimeters are in 3.2 meters?"
             },
             {
                 "role": "assistant",
                 "content": (
-                    "1 km = 1000 meters.\n"
-                    "3 km = 3 × 1000 = <answer>3000</answer>"
-                ),
+                    "1 meter = 100 centimeters. "
+                    "Compute: 3.2 × 100 = 320. "
+                    "<answer>320.0</answer>"
+                )
             },
 
             # Example 3
             {
                 "role": "user",
-                "content": "How many centimeters are in 4 meters?"
+                "content": "How many milligrams are in 1.75 grams?"
             },
             {
                 "role": "assistant",
                 "content": (
-                    "1 meter = 100 centimeters.\n"
-                    "4 meters = 4 × 100 = <answer>400</answer>"
-                ),
+                    "1 gram = 1000 milligrams. "
+                    "Compute: 1.75 × 1000 = 1750. "
+                    "<answer>1750.0</answer>"
+                )
             },
 
-            # Actual question
+            # Final user question
             {
                 "role": "user",
-                "content": question.strip()
-            },
+                "content": question
+            }
         ]
 
-        # Convert to model-specific prompt format
-        prompt = self.tokenizer.apply_chat_template(
+        return self.tokenizer.apply_chat_template(
             messages,
             add_generation_prompt=True,
-            tokenize=False
+            tokenize=False,
         )
-
-        return prompt
 
 
 def load() -> CoTModel:
@@ -87,7 +86,6 @@ def load() -> CoTModel:
 
 def test_model():
     from .data import Dataset, benchmark
-
     testset = Dataset("valid")
     model = CoTModel()
     result = benchmark(model, testset, 100)

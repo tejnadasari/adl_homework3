@@ -1,9 +1,10 @@
 from typing import overload
-
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-checkpoint = "HuggingFaceTB/SmolLM2-360M-Instruct"
+
+CHECKPOINT = "HuggingFaceTB/SmolLM2-360M-Instruct"
+
 
 device = (
     "cuda" if torch.cuda.is_available()
@@ -13,31 +14,34 @@ device = (
 
 
 class BaseLLM:
-    def __init__(self, checkpoint=checkpoint):
-        self.tokenizer = AutoTokenizer.from_pretrained(checkpoint)
-        self.model = AutoModelForCausalLM.from_pretrained(checkpoint).to(device)
+    def __init__(self, checkpoint=CHECKPOINT):
         self.device = device
+        self.tokenizer = AutoTokenizer.from_pretrained(checkpoint)
 
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        self.model = AutoModelForCausalLM.from_pretrained(checkpoint).to(self.device)
+
+    # -------------------------------------------------------
+    # formatting + parsing 
+    # -------------------------------------------------------
     def format_prompt(self, question: str) -> str:
-        """
-        This is intentionally left simple.
-        CoTModel overrides this method.
-        """
+        """Simple prompt. CoTModel overrides this."""
         return question
 
-    def parse_answer(self, answer: str) -> float:
-        """
-        Extract <answer>...</answer> float from model output.
-        """
+    def parse_answer(self, text: str) -> float:
+        """Extract <answer>...</answer>."""
         try:
-            return float(answer.split("<answer>")[1].split("</answer>")[0])
-        except Exception:
+            return float(text.split("<answer>")[1].split("</answer>")[0])
+        except:
             return float("nan")
 
+    # -------------------------------------------------------
+    # SINGLE EXAMPLE GENERATION (debug)
+    # -------------------------------------------------------
     def generate(self, prompt: str) -> str:
-        """
-        Non-batched generation for debugging.
-        """
+        """Deterministic generation for debugging."""
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
 
         with torch.no_grad():
@@ -45,38 +49,44 @@ class BaseLLM:
                 input_ids=inputs["input_ids"],
                 attention_mask=inputs["attention_mask"],
                 max_new_tokens=50,
+                do_sample=False,
+                temperature=0.0,
+                top_p=1.0,
+                repetition_penalty=1.0,
                 eos_token_id=self.tokenizer.eos_token_id,
-                pad_token_id=self.tokenizer.eos_token_id,
-                do_sample=True,
-                temperature=0.7,
-                top_p=0.9,
-                repetition_penalty=1.05,
+                pad_token_id=self.tokenizer.pad_token_id,
             )
 
-        generated = outputs[:, inputs["input_ids"].shape[1]:]
-        return self.tokenizer.decode(generated[0], skip_special_tokens=True)
+        generated_tokens = outputs[:, inputs["input_ids"].shape[1]:]
+        return self.tokenizer.decode(generated_tokens[0], skip_special_tokens=True)
+
+    # -------------------------------------------------------
+    # BATCHED GENERATION (USED BY GRADER)
+    # -------------------------------------------------------
+    @overload
+    def batched_generate(
+        self, prompts: list[str], num_return_sequences: None = None
+    ) -> list[str]:
+        ...
 
     @overload
     def batched_generate(
-        self, prompts: list[str], num_return_sequences: None = None, temperature: float = 0
-    ) -> list[str]: ...
-
-    @overload
-    def batched_generate(
-        self, prompts: list[str], num_return_sequences: int, temperature: float = 0
-    ) -> list[list[str]]: ...
+        self, prompts: list[str], num_return_sequences: int
+    ) -> list[list[str]]:
+        ...
 
     def batched_generate(
         self,
         prompts: list[str],
         num_return_sequences: int | None = None,
         temperature: float = 0,
-    ) -> list[str] | list[list[str]]:
-
+    ):
+        # Set padding to left for generation
         self.tokenizer.padding_side = "left"
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
+        # Tokenize with padding
         inputs = self.tokenizer(
             prompts,
             padding=True,
@@ -85,53 +95,62 @@ class BaseLLM:
 
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
-        generation_kwargs = {
+
+        # Set generation parameters
+        gen_kwargs = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "max_new_tokens": 50,
             "eos_token_id": self.tokenizer.eos_token_id,
             "pad_token_id": self.tokenizer.pad_token_id,
-            "do_sample": True,
-            "temperature": 0.7,
+            "do_sample": temperature > 0,
+            "temperature": temperature if temperature > 0 else 1.0,
             "top_p": 0.9,
-            "repetition_penalty": 1.05,
+            "repetition_penalty": 1.02,
         }
 
         if num_return_sequences is not None:
-            generation_kwargs["num_return_sequences"] = num_return_sequences
+            gen_kwargs["num_return_sequences"] = num_return_sequences
 
+        # Generate
         with torch.no_grad():
-            outputs = self.model.generate(**generation_kwargs)
+            outputs = self.model.generate(**gen_kwargs)
 
-        input_len = input_ids.shape[1]
-        generated_only = outputs[:, input_len:]
+        # Extract only the generated tokens (not the prompt)
+        # Since all prompts are padded to same length, we can use a simple slice
+        prompt_len = input_ids.size(1)
+        generated_tokens = outputs[:, prompt_len:]
 
+        # Decode all outputs
         decoded = self.tokenizer.batch_decode(
-            generated_only,
+            generated_tokens,
             skip_special_tokens=True
         )
 
+        # Reshape if num_return_sequences > 1
         if num_return_sequences and num_return_sequences > 1:
             grouped = []
             for i in range(0, len(decoded), num_return_sequences):
-                grouped.append(decoded[i:i + num_return_sequences])
+                grouped.append(decoded[i : i + num_return_sequences])
             return grouped
 
         return decoded
 
     def answer(self, *questions) -> list[float]:
         prompts = [self.format_prompt(q) for q in questions]
-        generations = self.batched_generate(prompts)
-        return [self.parse_answer(g) for g in generations]
+        gens = self.batched_generate(prompts)
+        return [self.parse_answer(g) for g in gens]
 
 
+# Debug
 def test_model():
-    testset = ["The cat went up", "The dog went down"]
+    print("testing generate function")
     m = BaseLLM()
-    for t in testset:
+    tests = ["The cat went up", "The dog went down"]
+    for t in tests:
         print("input:", t)
         print("output:", m.generate(t))
-    print(m.batched_generate(testset))
+    print(m.batched_generate(tests))
 
 
 if __name__ == "__main__":
