@@ -33,10 +33,10 @@ class RFTTorchDataset(TorchDataset):
 def load():
     from pathlib import Path
     from peft import PeftModel
-
+    
     model_path = Path(__file__).parent / "rft_model"
     llm = BaseLLM()
-    llm.model = PeftModel.from_pretrained(llm.model, model_path).to(llm.device)
+    llm.model = PeftModel.from_pretrained(llm.model, str(model_path)).to(llm.device)  
     llm.model.eval()
     return llm
 
@@ -101,3 +101,4 @@ def train_model(
 if __name__ == "__main__":
     from fire import Fire
     Fire({"train": train_model, "test": test_model, "load": load})
+

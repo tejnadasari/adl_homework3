@@ -23,9 +23,6 @@ class BaseLLM:
 
         self.model = AutoModelForCausalLM.from_pretrained(checkpoint).to(self.device)
 
-    # -------------------------------------------------------
-    # formatting + parsing 
-    # -------------------------------------------------------
     def format_prompt(self, question: str) -> str:
         """Simple prompt. CoTModel overrides this."""
         return question
@@ -37,41 +34,27 @@ class BaseLLM:
         except:
             return float("nan")
 
-    # -------------------------------------------------------
-    # SINGLE EXAMPLE GENERATION (debug)
-    # -------------------------------------------------------
     def generate(self, prompt: str) -> str:
-        """Deterministic generation for debugging."""
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
+        """
+        (Optional) Implement this method first and then implement batched_generate below.
+        It is much easier to implement generation without batching.
 
-        with torch.no_grad():
-            outputs = self.model.generate(
-                input_ids=inputs["input_ids"],
-                attention_mask=inputs["attention_mask"],
-                max_new_tokens=50,
-                do_sample=False,
-                temperature=0.0,
-                top_p=1.0,
-                repetition_penalty=1.0,
-                eos_token_id=self.tokenizer.eos_token_id,
-                pad_token_id=self.tokenizer.pad_token_id,
-            )
+        The overall flow is the same:
+        - tokenize the prompt with self.tokenizer
+        - call self.model.generate
+        - decode the outputs with self.tokenizer.decode
+        """
+        return self.batched_generate([prompt])[0]
 
-        generated_tokens = outputs[:, inputs["input_ids"].shape[1]:]
-        return self.tokenizer.decode(generated_tokens[0], skip_special_tokens=True)
-
-    # -------------------------------------------------------
-    # BATCHED GENERATION (USED BY GRADER)
-    # -------------------------------------------------------
     @overload
     def batched_generate(
-        self, prompts: list[str], num_return_sequences: None = None
+        self, prompts: list[str], num_return_sequences: None = None, temperature: float = 0
     ) -> list[str]:
         ...
 
     @overload
     def batched_generate(
-        self, prompts: list[str], num_return_sequences: int
+        self, prompts: list[str], num_return_sequences: int, temperature: float = 0
     ) -> list[list[str]]:
         ...
 
@@ -80,13 +63,11 @@ class BaseLLM:
         prompts: list[str],
         num_return_sequences: int | None = None,
         temperature: float = 0,
-    ):
-        # Set padding to left for generation
+    ) -> list[str] | list[list[str]]:
         self.tokenizer.padding_side = "left"
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-        # Tokenize with padding
         inputs = self.tokenizer(
             prompts,
             padding=True,
@@ -96,38 +77,36 @@ class BaseLLM:
         input_ids = inputs["input_ids"]
         attention_mask = inputs["attention_mask"]
 
-        # Set generation parameters
         gen_kwargs = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
             "max_new_tokens": 50,
             "eos_token_id": self.tokenizer.eos_token_id,
             "pad_token_id": self.tokenizer.pad_token_id,
-            "do_sample": temperature > 0,
-            "temperature": temperature if temperature > 0 else 1.0,
-            "top_p": 0.9,
             "repetition_penalty": 1.02,
         }
+
+        if temperature > 0:
+            gen_kwargs["do_sample"] = True
+            gen_kwargs["temperature"] = temperature
+            gen_kwargs["top_p"] = 0.9
+        else:
+            gen_kwargs["do_sample"] = False
 
         if num_return_sequences is not None:
             gen_kwargs["num_return_sequences"] = num_return_sequences
 
-        # Generate
         with torch.no_grad():
             outputs = self.model.generate(**gen_kwargs)
 
-        # Extract only the generated tokens (not the prompt)
-        # Since all prompts are padded to same length, we can use a simple slice
         prompt_len = input_ids.size(1)
         generated_tokens = outputs[:, prompt_len:]
 
-        # Decode all outputs
         decoded = self.tokenizer.batch_decode(
             generated_tokens,
             skip_special_tokens=True
         )
 
-        # Reshape if num_return_sequences > 1
         if num_return_sequences and num_return_sequences > 1:
             grouped = []
             for i in range(0, len(decoded), num_return_sequences):
@@ -142,7 +121,6 @@ class BaseLLM:
         return [self.parse_answer(g) for g in gens]
 
 
-# Debug
 def test_model():
     print("testing generate function")
     m = BaseLLM()

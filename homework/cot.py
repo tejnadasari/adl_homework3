@@ -6,25 +6,22 @@ class CoTModel(BaseLLM):
 
     def format_prompt(self, question: str) -> str:
         """
-        Highly structured CoT format optimized for 360M models.
-        - Explicit step-by-step reasoning
-        - Explicit unit equivalence statement
-        - Explicit multiply operation
-        - Always ends with <answer>...</answer>
+        Optimized few-shot CoT prompt that mirrors rft.json style exactly.
         """
 
         messages = [
             {
                 "role": "system",
                 "content": (
-                    "You are a careful math assistant. "
-                    "Solve unit conversion questions using the correct conversion factor. "
-                    "Show the steps: state the unit relationship, multiply, and output the final number "
-                    "INSIDE <answer></answer>. Only produce one answer."
+                    "You are an accurate unit conversion assistant. "
+                    "For every question, show the correct conversion rule, "
+                    "perform the multiplication explicitly, and put ONLY the "
+                    "final numeric answer inside <answer></answer>. "
+                    "Do not include words or units inside <answer>."
                 )
             },
 
-            # Example 1
+            # Example 1 — matches RFT style
             {
                 "role": "user",
                 "content": "How many grams are in 4 kilograms?"
@@ -33,43 +30,43 @@ class CoTModel(BaseLLM):
                 "role": "assistant",
                 "content": (
                     "1 kilogram = 1000 grams. "
-                    "Compute: 4 × 1000 = 4000. "
-                    "<answer>4000.0</answer>"
+                    "Compute 4 × 1000 = 4000. "
+                    "<answer>4000</answer>"
                 )
             },
 
-            # Example 2
+            # Example 2 — matches RFT structure (uses Multiply)
             {
                 "role": "user",
-                "content": "How many centimeters are in 3.2 meters?"
+                "content": "Convert 3 liters to cubic centimeters."
             },
             {
                 "role": "assistant",
                 "content": (
-                    "1 meter = 100 centimeters. "
-                    "Compute: 3.2 × 100 = 320. "
-                    "<answer>320.0</answer>"
+                    "1 liter = 1000 cubic centimeters. "
+                    "Multiply 3 by 1000 = 3000. "
+                    "<answer>3000</answer>"
                 )
             },
 
-            # Example 3
+            # Example 3 — includes decimal conversion like RFT
             {
                 "role": "user",
-                "content": "How many milligrams are in 1.75 grams?"
+                "content": "How many meters per second is 10 feet per second?"
             },
             {
                 "role": "assistant",
                 "content": (
-                    "1 gram = 1000 milligrams. "
-                    "Compute: 1.75 × 1000 = 1750. "
-                    "<answer>1750.0</answer>"
+                    "1 foot = 0.3048 meters. "
+                    "Compute 10 × 0.3048 = 3.048. "
+                    "<answer>3.048</answer>"
                 )
             },
 
-            # Final user question
+            # Real task
             {
                 "role": "user",
-                "content": question
+                "content": question.strip()
             }
         ]
 
@@ -80,18 +77,5 @@ class CoTModel(BaseLLM):
         )
 
 
-def load() -> CoTModel:
+def load():
     return CoTModel()
-
-
-def test_model():
-    from .data import Dataset, benchmark
-    testset = Dataset("valid")
-    model = CoTModel()
-    result = benchmark(model, testset, 100)
-    print(f"{result.accuracy=}  {result.answer_rate=}")
-
-
-if __name__ == "__main__":
-    from fire import Fire
-    Fire({"test": test_model, "load": load})
