@@ -80,10 +80,11 @@ class BaseLLM:
         gen_kwargs = {
             "input_ids": input_ids,
             "attention_mask": attention_mask,
-            "max_new_tokens": 50,
+            "max_new_tokens": 50,  # Back to 50
             "eos_token_id": self.tokenizer.eos_token_id,
             "pad_token_id": self.tokenizer.pad_token_id,
-            "repetition_penalty": 1.02,
+            "repetition_penalty": 1.02,  # Back to 1.02
+            # REMOVE no_repeat_ngram_size completely!
         }
 
         if temperature > 0:

@@ -2,7 +2,6 @@ import json
 from torch.utils.data import Dataset as TorchDataset
 from transformers import Trainer, TrainingArguments
 from peft import LoraConfig, get_peft_model
-
 from .base_llm import BaseLLM
 from .sft import tokenize, test_model
 
@@ -13,11 +12,9 @@ class RFTTorchDataset(TorchDataset):
     Each entry is [question, answer, full_reasoning_with_answer].
     We treat reasoning+answer as one string.
     """
-
     def __init__(self, tokenizer, json_path: str):
         with open(json_path, "r") as f:
             raw = json.load(f)
-
         self.data = raw
         self.tokenizer = tokenizer
 
@@ -26,7 +23,6 @@ class RFTTorchDataset(TorchDataset):
 
     def __getitem__(self, idx):
         q, true_ans, reasoning = self.data[idx]
-
         return tokenize(self.tokenizer, q, reasoning)
 
 
@@ -46,15 +42,14 @@ def train_model(
     output_dir: str,
     lr: float = 2e-4,
     batch_size: int = 8,
-    epochs: int = 5,
-    lora_r: int = 32,
-    lora_alpha: int = 64,
+    epochs: int = 10,  # ✅ Changed from 5 to 10
+    lora_r: int = 18,  # ✅ Changed from 32 to 18
+    lora_alpha: int = 72,  # ✅ Changed to 4x rank (18*4=72)
     lora_dropout: float = 0.05,
     **kwargs,
 ):
     print(f"Loading RFT dataset: {data_path}")
     base = BaseLLM()
-
     train_dataset = RFTTorchDataset(base.tokenizer, data_path)
     print(f"Loaded {len(train_dataset)} RFT samples")
 
@@ -67,7 +62,6 @@ def train_model(
         target_modules=["q_proj", "v_proj"],
         task_type="CAUSAL_LM",
     )
-
     base.model = get_peft_model(base.model, lora_cfg)
     base.model.print_trainable_parameters()
 
@@ -82,8 +76,9 @@ def train_model(
         save_strategy="epoch",
         logging_steps=10,
         report_to=[],
+        warmup_steps=50,  # ✅ Added warmup
+        weight_decay=0.01,  # ✅ Added weight decay
     )
-
     trainer = Trainer(
         model=base.model,
         args=training_args,
@@ -93,7 +88,6 @@ def train_model(
 
     print("Training RFT model…")
     trainer.train()
-
     print(f"Training complete. Saving to {output_dir}")
     trainer.save_model(output_dir)
 
@@ -101,4 +95,3 @@ def train_model(
 if __name__ == "__main__":
     from fire import Fire
     Fire({"train": train_model, "test": test_model, "load": load})
-
